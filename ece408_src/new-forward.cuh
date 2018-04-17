@@ -22,7 +22,7 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     We have some nice #defs for you below to simplify indexing. Feel free to use them, or create your own.
     */
 
-    //const int H_out = H - K + 1;
+    const int H_out = H - K + 1;
     const int W_out = W - K + 1;
     int W_grid=W_out/TILE_WIDTH;
     //int H_grid=H_out/TILE_WIDTH;
