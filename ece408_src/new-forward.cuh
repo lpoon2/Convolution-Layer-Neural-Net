@@ -24,7 +24,7 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
 
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
-    int W_grid=W_out/TILE_WIDTH;
+    int W_grid=ceil(W_out/(1.0*TILE_WIDTH));
     //int H_grid=H_out/TILE_WIDTH;
 
 
@@ -36,9 +36,10 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
 #define k4d(i3, i2, i1, i0) k[(i3) * (C * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
 int n = blockIdx.x;
 int m = blockIdx.y;
-int h = blockIdx.z/W_grid+threadIdx.y;
-int w = blockIdx.z%W_grid+threadIdx.x;
+int h = ((blockIdx.z/W_grid)*TILE_WIDTH)+threadIdx.y;
+int w = ((blockIdx.z%W_grid)*TILE_WIDTH)+threadIdx.x;
 float acc=0;
+
 for(int c=0;c<C;c++){
   for(int p=0;p<K;p++) {
     for(int q=0; q<K; q++){
@@ -47,6 +48,7 @@ for(int c=0;c<C;c++){
   }
 }
 y4d(n,m,h,w)=acc;
+
 //y4d(blockIdx.x,blockIdx.y,threadIdx.x,threadIdx.y)=sum;
 #undef y4d
 #undef x4d
@@ -65,7 +67,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     // Use mxnet's CHECK_EQ to do assertions.
     // Remove this assertion when you do your implementation!
     //CHECK_EQ(0, 1) << "Remove this line and replace with your implementation";
-    cudaStream_t s = y.stream_->stream_;
+    //cudaStream_t s = y.stream_->stream_;
     // Extract the tensor dimensions into B,M,C,H,W,K
     // ...
     const int B = x.shape_[0]; //batches
@@ -83,7 +85,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
      dim3 gridDim(B,M,Z);
      dim3 blockDim(TILE_WIDTH,TILE_WIDTH,1);
     // Call the kernel
-    forward_kernel<<<gridDim, blockDim, 0, s>>>(y.dptr_,x.dptr_,w.dptr_, B,M,C,H,W,K);
+    forward_kernel<<<gridDim, blockDim>>>(y.dptr_,x.dptr_,w.dptr_, B,M,C,H,W,K);
 
     // Use MSHADOW_CUDA_CALL to check for CUDA runtime errors.
     MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
