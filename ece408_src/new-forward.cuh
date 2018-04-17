@@ -1,4 +1,3 @@
-
 #ifndef MXNET_OPERATOR_NEW_FORWARD_CUH_
 #define MXNET_OPERATOR_NEW_FORWARD_CUH_
 #define TITLE_SIZE 32
@@ -8,6 +7,17 @@ namespace mxnet
 {
 namespace op
 {
+
+__global__ void buildWeightMatrix(const float *k, float *weight_mat, int K /*weight tile size*/ ,const int M, const int C) {
+  int row = blockIdx.y * M + blockIdx.x;
+  int b = blockIdx.y;
+  int c = blockIdx.x;
+  int i = threadIdx.y * TITLE_SIZE + threadIdx;
+  if (i < K*K) {
+    weight_mat[(b+c)*(K*K)+i] = k4d(b, c, (i / K) % K, i % K);
+  }
+  #define k4d(i3, i2, i1, i0) k[(i3) * (C * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
+}
 
 __global__ void forward_kernel(float *y, const float *x, const float *k, const int B, const int M, const int C, const int H, const int W, const int K)
 {
@@ -21,7 +31,6 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
 
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
-
     int W_grid = W_out / TITLE_SIZE;
     int H_grid = H_out / TITLE_SIZE;
     int m = blockIdx.x;
@@ -68,16 +77,33 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     const int K = w.shape_[3];
 
     const int H_out = H - K + 1;
-    const int W_out = W - K + 1;
+    const int W_out = W - K + 1
+
+    const int W_wmat = K*K*C; /* width of weight matrix*/
+    const int H_wmat = M; /* height */
+    const int W_imat = H_out * W_out;
+    const int H_imat = K*K*C;
 
     int W_grid = W_out / TITLE_SIZE;
     int H_grid = H_out / TITLE_SIZE;
+    const int Y = H_grid * W_grid;
+    float *k;
+    /*
+    Allocate GPU memory
+    */
+    cudaMalloc((void**) &k, sizeof(float) * B * C * K * K);
+    /*
+    Copy input memory into GPU memory
+    */
+    cudaMemcpy(k, w, sizeof(float) * B * C * K * K, cudaMemcpyHostToDevice);
+
+    dim3 blockDim(ceil( K / TILE_WIDTH), ceil( K / TILE_WIDTH), 1);
+    dim3 gridDim(M, Y, 1);
+    buildWeightMatrix<<gridDim, blockDim>>();
     // Set the kernel dimensions
     // dim3 gridDim(0);
     // dim3 blockDim(0);
-    const int Y = H_grid * W_grid;
-    dim3 blockDim(TILE_WIDTH, TILE_WIDTH, 1);
-    dim3 gridDim(M, Y, 1);
+
     // Call the kernel
     // forward_kernel<<<gridDim, blockDim, 0, s>>>(y.dptr_,x.dptr_,w.dptr_, B,M,C,H,W,K);
 
