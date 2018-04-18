@@ -3,8 +3,6 @@
 #define MXNET_OPERATOR_NEW_FORWARD_CUH_
 #define TILE_WIDTH 32
 
-
-
 #include <mxnet/base.h>
 #include <stdio.h>
 #include <math.h>
@@ -55,9 +53,6 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
 template <>
 void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tensor<gpu, 4, float> &x, const mshadow::Tensor<gpu, 4, float> &w)
 {
-    // Use mxnet's CHECK_EQ to do assertions.
-    // Remove this assertion when you do your implementation!
-    //CHECK_EQ(0, 1) << "Remove this line and replace with your implementation";
     const int B = x.shape_[0]; //batches
     const int M = y.shape_[1]; //output channels
     const int C = x.shape_[1]; //input channels
@@ -68,7 +63,10 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
     //int Z=H_grid*W_grid;
-    dim3 gridDim(ceil((M*W_out)/TILE_WIDTH*1.0), ceil((B*H_out)/TILE_WIDTH*1.0), 1);
+    dim3 gridDim(ceil((M*W_out)/(TILE_WIDTH*1.0)), ceil((B*H_out)/(TILE_WIDTH*1.0)), 1);
+    printf("===================== x dim : %d, y dim : %f , B : %d=============", ceil((M*W_out)/(TILE_WIDTH*1.0)), ceil((B*H_out)/(TILE_WIDTH*1.0)), B);
+    printf("===================== B : %d, M: %d ,C: %d, B : %d, H_out: %d ,W_out: %d =============", B, M, C, B, H_out, W_out);
+
     dim3 blockDim(TILE_WIDTH,TILE_WIDTH,1);
     // Call the kernel
     forward_kernel<<<gridDim, blockDim>>>(y.dptr_,x.dptr_,w.dptr_, B,M,C,H,W,K);
