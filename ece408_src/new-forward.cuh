@@ -28,7 +28,7 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     int h = (blockIdx.y * blockDim.y + threadIdx.y) % H_out;
     int w = (blockIdx.x * blockDim.x + threadIdx.x) % W_out;
 
-    if (((blockIdx.x * blockDim.x + threadIdx.x) < (W_out * C)) && ((blockIdx.y * blockDim.y + threadIdx.y) < (H_out * B))) {
+    if (((blockIdx.x * blockDim.x + threadIdx.x) < (W_out * M)) && ((blockIdx.y * blockDim.y + threadIdx.y) < (H_out * B))) {
       float acc=0;
       for(int c=0;c<C;c++) {
         for(int p=0;p<K;p++) {
@@ -62,11 +62,9 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     // Set the kernel dimensions
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
-    //int Z=H_grid*W_grid;
-    dim3 gridDim(ceil((M*W_out)/(TILE_WIDTH*1.0)), ceil((B*H_out)/(TILE_WIDTH*1.0)), 1);
-    printf("===================== x dim : %d, y dim : %f , B : %d=============", ceil((M*W_out)/(TILE_WIDTH*1.0)), ceil((B*H_out)/(TILE_WIDTH*1.0)), B);
-    printf("===================== B : %d, M: %d ,C: %d, B : %d, H_out: %d ,W_out: %d =============", B, M, C, B, H_out, W_out);
-
+    int X = ceil((M*W_out)/(TILE_WIDTH*1.0));
+    int Y = ceil((B*H_out)/(TILE_WIDTH*1.0));
+    dim3 gridDim(X, Y, 1);
     dim3 blockDim(TILE_WIDTH,TILE_WIDTH,1);
     // Call the kernel
     forward_kernel<<<gridDim, blockDim>>>(y.dptr_,x.dptr_,w.dptr_, B,M,C,H,W,K);
