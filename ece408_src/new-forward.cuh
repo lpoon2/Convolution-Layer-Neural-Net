@@ -19,8 +19,8 @@ __global__ void unroll_weight(float *output_w, const float *k, const int M, cons
   int c = (blockIdx.x * blockDim.x + threadIdx.x) / (K*K);
   int h = ((blockIdx.x * blockDim.x + threadIdx.x) % (K*K)) / K;
   int w = (blockIdx.x * blockDim.x + threadIdx.x) % K;
-  int weight_wid = TILE_WIDTH * ceil((C * K * K)/(TILE_WIDTH*1.0));
-  int idx = weight_wid * (blockIdx.y * blockDim.y + threadIdx.y) + (blockIdx.x * blockDim.x + threadIdx.x);
+  //int weight_wid = TILE_WIDTH * ceil((C * K * K)/(TILE_WIDTH*1.0));
+  int idx = (C*K*K) * (blockIdx.y * blockDim.y + threadIdx.y) + (blockIdx.x * blockDim.x + threadIdx.x);
   #define k4d(i3, i2, i1, i0) k[(i3) * (C * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
 
   if (((blockIdx.x * blockDim.x + threadIdx.x) < (K*K*C)) && ((blockIdx.y * blockDim.y + threadIdx.y) < M)) {
@@ -32,14 +32,14 @@ __global__ void unroll_weight(float *output_w, const float *k, const int M, cons
 
 __global__ void unroll_input(float *output_x, const float *x, const int B, const int C, const int H, const int W, const int K) {
   #define x4d(i3, i2, i1, i0) x[(i3) * (C * H * W) + (i2) * (H * W) + (i1) * (W) + i0]
-  int start_h = ((blockIdx.x * blockDim.x + threadIdx.x) % (H*W)) / K;
-  int start_w = ((blockIdx.x * blockDim.x + threadIdx.x) % (H*W)) % K;
+  int start_h = ((blockIdx.x * blockDim.x + threadIdx.x) % (H*W)) / W;
+  int start_w = ((blockIdx.x * blockDim.x + threadIdx.x) % (H*W)) % W;
   int h = start_h + ((blockIdx.y * blockDim.y + threadIdx.y) % (K*K)) / K;
   int w = start_w + ((blockIdx.y * blockDim.y + threadIdx.y) % (K*K)) % K;
   int c = (blockIdx.y * blockDim.y + threadIdx.y) / (K*K);
   int b = (blockIdx.x * blockDim.x + threadIdx.x) / (H*W);
-  int input_wid = TILE_WIDTH * ceil((H*W*B)/(TILE_WIDTH*1.0));
-  int idx = input_wid * (blockIdx.y * blockDim.y + threadIdx.y) + (blockIdx.x * blockDim.x + threadIdx.x);
+  //int input_wid = TILE_WIDTH * ceil((H*W*B)/(TILE_WIDTH*1.0));
+  int idx = (H*W*B) * (blockIdx.y * blockDim.y + threadIdx.y) + (blockIdx.x * blockDim.x + threadIdx.x);
 
   if (((blockIdx.x * blockDim.x + threadIdx.x) < (H*W*B)) && ((blockIdx.y * blockDim.y + threadIdx.y) < (K*K*C))) {
     output_x[idx] = x4d(b,c,h,w);
@@ -119,9 +119,6 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     const int H = x.shape_[2]; //height of input
     const int W = x.shape_[3]; //width of input
     const int K = w.shape_[3]; //height and width of weights
-    // Set the kernel dimensions
-    const int H_out = H - K + 1;
-    const int W_out = W - K + 1;
 
     // milestone 3 code
     /*
@@ -137,7 +134,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     float *unrolled_x;
     cudaMalloc((void **) &unrolled_w, K*K*C*M * sizeof(float));
     cudaMalloc((void **) &unrolled_x, H*W*B*K*K*C * sizeof(float));
-    
+
     //unrolling weight
     int X = ceil((C*K*K)/(TILE_WIDTH*1.0));
     int Y = ceil(M/(TILE_WIDTH*1.0));
