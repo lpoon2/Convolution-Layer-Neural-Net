@@ -15,36 +15,43 @@ namespace op
   This will be refractor after Wally's optimization (writing weight matrix into constant memory)
 */
 __global__ void unroll_weight(float *output_w, const float *k, const int M, const int C, const int K) {
-    int m = (blockIdx.y * blockDim.y + threadIdx.y) % M;
-    int c = (blockIdx.x * blockDim.x + threadIdx.x) / (K*K);
-    int h = (blockIdx.x * blockDim.x + threadIdx.x) / K;
-    int w = (blockIdx.x * blockDim.x + threadIdx.x) % K;
-    #define k4d(i3, i2, i1, i0) k[(i3) * (C * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
-    if ((blockIdx.x * blockDim.x + threadIdx.x) < (K*K*C)) && ((blockIdx.y * blockDim.y + threadIdx.y) < M) {
-      int idx = (K*K*C) * (blockIdx.y * blockDim.y + threadIdx.y) + (blockIdx.x * blockDim.x + threadIdx.x);
-      output_w[idx] = k4d(m,c,h,w);
-    }
-    #undef k4d
+  int m = (blockIdx.y * blockDim.y + threadIdx.y);
+  int c = (blockIdx.x * blockDim.x + threadIdx.x) / (K*K);
+  int h = ((blockIdx.x * blockDim.x + threadIdx.x) % (K*K)) / K;
+  int w = (blockIdx.x * blockDim.x + threadIdx.x) % K;
+  int weight_wid = TILE_WIDTH * ceil((C * K * K)/(TILE_WIDTH*1.0));
+  int idx = weight_wid * (blockIdx.y * blockDim.y + threadIdx.y) + (blockIdx.x * blockDim.x + threadIdx.x);
+  #define k4d(i3, i2, i1, i0) k[(i3) * (C * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
+
+  if (((blockIdx.x * blockDim.x + threadIdx.x) < (K*K*C)) && ((blockIdx.y * blockDim.y + threadIdx.y) < M)) {
+    output_w[idx] = k4d(m,c,h,w);
+  }
+
+  #undef k4d
 }
-__global__ void unroll_input(float *output_x, const float *x) {
+
+__global__ void unroll_input(float *output_x, const float *x, const int B, const int C, const int H, const int W, const int K) {
   #define x4d(i3, i2, i1, i0) x[(i3) * (C * H * W) + (i2) * (H * W) + (i1) * (W) + i0]
   int start_h = ((blockIdx.x * blockDim.x + threadIdx.x) % (H*W)) / K;
-  int start_w = (((blockIdx.x * blockDim.x + threadIdx.x) % (H*W)) % K;
+  int start_w = ((blockIdx.x * blockDim.x + threadIdx.x) % (H*W)) % K;
   int h = start_h + ((blockIdx.y * blockDim.y + threadIdx.y) % (K*K)) / K;
   int w = start_w + ((blockIdx.y * blockDim.y + threadIdx.y) % (K*K)) % K;
   int c = (blockIdx.y * blockDim.y + threadIdx.y) / (K*K);
   int b = (blockIdx.x * blockDim.x + threadIdx.x) / (H*W);
+  int input_wid = TILE_WIDTH * ceil((H*W*B)/(TILE_WIDTH*1.0));
+  int idx = input_wid * (blockIdx.y * blockDim.y + threadIdx.y) + (blockIdx.x * blockDim.x + threadIdx.x);
 
-  if ((blockIdx.x * blockDim.x + threadIdx.x) < (H*W*B)) && ((blockIdx.y * blockDim.y + threadIdx.y) < (H*W*C)) {
-    int idx = (H*W*B) /* make sure our gridDim and block dim match with this*/
-    * (blockIdx.y * blockDim.y + threadIdx.y) + (blockIdx.x * blockDim.x + threadIdx.x);
+  if (((blockIdx.x * blockDim.x + threadIdx.x) < (H*W*B)) && ((blockIdx.y * blockDim.y + threadIdx.y) < (K*K*C))) {
     output_x[idx] = x4d(b,c,h,w);
   }
-
   #undef x4d
 }
 
-__global__ void unroll_multipy(float *weight, float *input, float output) {
+__global__ void unroll_multipy(float *weight, float *input, float *y, const int B, const int M, const int C, const int H, const int W, const int K) {
+  const int H_out = H - K + 1;
+  const int W_out = W - K + 1;
+  #define y4d(i3, i2, i1, i0) y[(i3) * (M * H_out * W_out) + (i2) * (H_out * W_out) + (i1) * (W_out) + i0]
+
   int row = blockIdx.y * blockDim.y + threadIdx.y;
   int col = blockIdx.x * blockDim.x + threadIdx.x;
   int weight_wid = K*K*C;
@@ -54,10 +61,15 @@ __global__ void unroll_multipy(float *weight, float *input, float output) {
   int h = (col % (H*W)) / W;
   int w = (col % (H*W)) % W;
   float temp = 0;
-  for (int i = 0; i< weight_wid; i++) {
-      temp += weight[row * weight_wid + i] * input[i * input_wid + col];
+
+  if ((col < input_wid) && (row < M)) {
+    for (int i = 0; i< weight_wid; i++) {
+        temp += weight[row * weight_wid + i] * input[i * input_wid + col];
+    }
+    y4d(b,m,h,w) = temp;
   }
-  y4d(b,m,h,w) = temp;
+
+  #undef y4d
 }
 
 __global__ void forward_kernel(float *y, const float *x, const float *k, const int B, const int M, const int C, const int H, const int W, const int K)
@@ -110,12 +122,53 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     // Set the kernel dimensions
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
+
+    // milestone 3 code
+    /*
     int X = ceil((M*W_out)/(TILE_WIDTH*1.0));
     int Y = ceil((B*H_out)/(TILE_WIDTH*1.0));
     dim3 gridDim(X, Y, 1);
     dim3 blockDim(TILE_WIDTH,TILE_WIDTH,1);
-    // Call the kernel
     forward_kernel<<<gridDim, blockDim>>>(y.dptr_,x.dptr_,w.dptr_, B,M,C,H,W,K);
+    */
+
+    //milestone 4 code
+    float *unrolled_w;
+    float *unrolled_x;
+    cudaMalloc((void **) &unrolled_w, K*K*C*M * sizeof(float));
+    cudaMalloc((void **) &unrolled_x, H*W*B*K*K*C * sizeof(float));
+    
+    //unrolling weight
+    int X = ceil((C*K*K)/(TILE_WIDTH*1.0));
+    int Y = ceil(M/(TILE_WIDTH*1.0));
+    dim3 gridDim(X, Y, 1);
+    dim3 blockDim(TILE_WIDTH,TILE_WIDTH,1);
+    unroll_weight<<<gridDim, blockDim>>>(unrolled_w, w.dptr_, M, C, K);
+    // Use MSHADOW_CUDA_CALL to check for CUDA runtime errors.
+    MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
+
+    //unrolling input
+    X = ceil((H*W*B)/(TILE_WIDTH*1.0));
+    Y = ceil((K*K*C)/(TILE_WIDTH*1.0));
+    dim3 gridDim2(X, Y, 1);
+    dim3 blockDim2(TILE_WIDTH,TILE_WIDTH,1);
+    unroll_input<<<gridDim2, blockDim2>>>(unrolled_x, x.dptr_, B, C, H, W, K);
+    // Use MSHADOW_CUDA_CALL to check for CUDA runtime errors.
+    MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
+
+    //matrx mul.
+    X = ceil((H*W*B)/(TILE_WIDTH*1.0));
+    Y = ceil(M/(TILE_WIDTH*1.0));
+    dim3 gridDim3(X, Y, 1);
+    dim3 blockDim3(TILE_WIDTH,TILE_WIDTH,1);
+    unroll_multipy<<<gridDim3, blockDim3>>>(unrolled_w, unrolled_x, y.dptr_, B, M, C, H, W, K);
+    // Use MSHADOW_CUDA_CALL to check for CUDA runtime errors.
+    MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
+
+    //free cuda memory
+    cudaFree(unrolled_w);
+    cudaFree(unrolled_x);
+
     // Use MSHADOW_CUDA_CALL to check for CUDA runtime errors.
     MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
 
