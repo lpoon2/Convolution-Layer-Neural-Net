@@ -11,6 +11,54 @@ namespace mxnet
 {
 namespace op
 {
+/*
+  This will be refractor after Wally's optimization (writing weight matrix into constant memory)
+*/
+__global__ void unroll_weight(float *output_w, const float *k, const int M, const int C, const int K) {
+    int m = (blockIdx.y * blockDim.y + threadIdx.y) % M;
+    int c = (blockIdx.x * blockDim.x + threadIdx.x) / (K*K);
+    int h = (blockIdx.x * blockDim.x + threadIdx.x) / K;
+    int w = (blockIdx.x * blockDim.x + threadIdx.x) % K;
+    #define k4d(i3, i2, i1, i0) k[(i3) * (C * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
+    if ((blockIdx.x * blockDim.x + threadIdx.x) < (K*K*C)) && ((blockIdx.y * blockDim.y + threadIdx.y) < M) {
+      int idx = (K*K*C) * (blockIdx.y * blockDim.y + threadIdx.y) + (blockIdx.x * blockDim.x + threadIdx.x);
+      output_w[idx] = k4d(m,c,h,w);
+    }
+    #undef k4d
+}
+__global__ void unroll_input(float *output_x, const float *x) {
+  #define x4d(i3, i2, i1, i0) x[(i3) * (C * H * W) + (i2) * (H * W) + (i1) * (W) + i0]
+  int start_h = ((blockIdx.x * blockDim.x + threadIdx.x) % (H*W)) / K;
+  int start_w = (((blockIdx.x * blockDim.x + threadIdx.x) % (H*W)) % K;
+  int h = start_h + ((blockIdx.y * blockDim.y + threadIdx.y) % (K*K)) / K;
+  int w = start_w + ((blockIdx.y * blockDim.y + threadIdx.y) % (K*K)) % K;
+  int c = (blockIdx.y * blockDim.y + threadIdx.y) / (K*K);
+  int b = (blockIdx.x * blockDim.x + threadIdx.x) / (H*W);
+
+  if ((blockIdx.x * blockDim.x + threadIdx.x) < (H*W*B)) && ((blockIdx.y * blockDim.y + threadIdx.y) < (H*W*C)) {
+    int idx = (H*W*B) /* make sure our gridDim and block dim match with this*/
+    * (blockIdx.y * blockDim.y + threadIdx.y) + (blockIdx.x * blockDim.x + threadIdx.x);
+    output_x[idx] = x4d(b,c,h,w);
+  }
+
+  #undef x4d
+}
+
+__global__ void unroll_multipy(float *weight, float *input, float output) {
+  int row = blockIdx.y * blockDim.y + threadIdx.y;
+  int col = blockIdx.x * blockDim.x + threadIdx.x;
+  int weight_wid = K*K*C;
+  int input_wid = H*W*B;
+  int b = col / (H*W);
+  int m = row;
+  int h = (col % (H*W)) / W;
+  int w = (col % (H*W)) % W;
+  float temp = 0;
+  for (int i = 0; i< weight_wid; i++) {
+      temp += weight[row * weight_wid + i] * input[i * input_wid + col];
+  }
+  y4d(b,m,h,w) = temp;
+}
 
 __global__ void forward_kernel(float *y, const float *x, const float *k, const int B, const int M, const int C, const int H, const int W, const int K)
 {
