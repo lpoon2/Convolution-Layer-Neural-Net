@@ -32,16 +32,18 @@ __global__ void unroll_weight(float *output_w, const float *k, const int M, cons
 
 __global__ void unroll_input(float *output_x, const float *x, const int B, const int C, const int H, const int W, const int K) {
   #define x4d(i3, i2, i1, i0) x[(i3) * (C * H * W) + (i2) * (H * W) + (i1) * (W) + i0]
-  int start_h = ((blockIdx.x * blockDim.x + threadIdx.x) % (H*W)) / W;
-  int start_w = ((blockIdx.x * blockDim.x + threadIdx.x) % (H*W)) % W;
+  const int H_out = H - K + 1;
+  const int W_out = W - K + 1;
+  int start_h = ((blockIdx.x * blockDim.x + threadIdx.x) % (H_out*W_out)) / W_out;
+  int start_w = ((blockIdx.x * blockDim.x + threadIdx.x) % (H_out*W_out)) % W_out;
   int h = start_h + (((blockIdx.y * blockDim.y + threadIdx.y) % (K*K)) / K);
   int w = start_w + (((blockIdx.y * blockDim.y + threadIdx.y) % (K*K)) % K);
   int c = (blockIdx.y * blockDim.y + threadIdx.y) / (K*K);
-  int b = (blockIdx.x * blockDim.x + threadIdx.x) / (H*W);
+  int b = (blockIdx.x * blockDim.x + threadIdx.x) / (H_out*W_out);
   //int input_wid = TILE_WIDTH * ceil((H*W*B)/(TILE_WIDTH*1.0));
-  int idx = (H*W*B) * (blockIdx.y * blockDim.y + threadIdx.y) + (blockIdx.x * blockDim.x + threadIdx.x);
+  int idx = (H_out*W_out*B) * (blockIdx.y * blockDim.y + threadIdx.y) + (blockIdx.x * blockDim.x + threadIdx.x);
 
-  if (((blockIdx.x * blockDim.x + threadIdx.x) < (H*W*B)) && ((blockIdx.y * blockDim.y + threadIdx.y) < (K*K*C))) {
+  if (((blockIdx.x * blockDim.x + threadIdx.x) < (H_out*W_out*B)) && ((blockIdx.y * blockDim.y + threadIdx.y) < (K*K*C))) {
     output_x[idx] = x4d(b,c,h,w);
   }
   __syncthreads();
@@ -56,11 +58,11 @@ __global__ void unroll_multipy(float *weight, float *input, float *y, const int 
   int row = blockIdx.y * blockDim.y + threadIdx.y;
   int col = blockIdx.x * blockDim.x + threadIdx.x;
   int weight_wid = K*K*C;
-  int input_wid = H*W*B;
-  int b = col / (H*W);
+  int input_wid = H_out*W_out*B;
+  int b = col / (H_out*W_out);
   int m = row;
-  int h = (col % (H*W)) / W;
-  int w = (col % (H*W)) % W;
+  int h = (col % (H_out*W_out)) / W_out;
+  int w = (col % (H_out*W_out)) % W_out;
   float temp = 0;
 
   if ((col < input_wid) && (row < M)) {
@@ -120,7 +122,8 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     const int H = x.shape_[2]; //height of input
     const int W = x.shape_[3]; //width of input
     const int K = w.shape_[3]; //height and width of weights
-
+    const int H_out = H - K + 1;
+    const int W_out = W - K + 1;
     // milestone 3 code
     /*
     int X = ceil((M*W_out)/(TILE_WIDTH*1.0));
@@ -146,7 +149,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
 
     //unrolling input
-    X = ceil((H*W*B)/(TILE_WIDTH*1.0));
+    X = ceil((H_out*W_out*B)/(TILE_WIDTH*1.0));
     Y = ceil((K*K*C)/(TILE_WIDTH*1.0));
     dim3 gridDim2(X, Y, 1);
     dim3 blockDim2(TILE_WIDTH,TILE_WIDTH,1);
@@ -155,7 +158,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
 
     //matrx mul.
-    X = ceil((H*W*B)/(TILE_WIDTH*1.0));
+    X = ceil((H_out*W_out*B)/(TILE_WIDTH*1.0));
     Y = ceil(M/(TILE_WIDTH*1.0));
     dim3 gridDim3(X, Y, 1);
     dim3 blockDim3(TILE_WIDTH,TILE_WIDTH,1);
