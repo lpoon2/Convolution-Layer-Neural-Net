@@ -1,7 +1,7 @@
 
 #ifndef MXNET_OPERATOR_NEW_FORWARD_CUH_
 #define MXNET_OPERATOR_NEW_FORWARD_CUH_
-#define TILE_WIDTH 16
+#define TILE_WIDTH 24
 
 #include <mxnet/base.h>
 
@@ -10,8 +10,8 @@ namespace mxnet
 namespace op
 {
 
-__global__ void forward_kernel(float *y, const float *x, const float *k, const int B, const int M, const int C, const int H, const int W, const int K)
-{
+__global__ void forward_kernel(float *y, const float *x, const float *k, const int B, const int M, const int C, const int H, const int W, const int K){
+
     float sum=0.0;
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
@@ -19,26 +19,25 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     int W_size=(X_width*X_width);
     extern __shared__ float shmem[];
     float* X_share = &shmem[0];
-    float* W_share=&shmem[W_size];
+    float* W_share=&shmem[X_width*X_width];
     #define y4d(i3, i2, i1, i0) y[(i3) * (M * H_out * W_out) + (i2) * (H_out * W_out) + (i1) * (W_out) + i0]
     #define x4d(i3, i2, i1, i0) x[(i3) * (C * H * W) + (i2) * (H * W) + (i1) * (W) + i0]
     #define k4d(i3, i2, i1, i0) k[(i3) * (C * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
-    int W_grid=W_out/TILE_WIDTH;
+    int W_grid=ceil(W_out/TILE_WIDTH*1.0);
     //int H_grid=ceil(H_out/TILE_WIDTH*1.0);
 
     int b = blockIdx.x;
-    //int b = blockIdx.y;
     int m = blockIdx.y;
-    //int m = blockIdx.x;
     int h0=threadIdx.x;
     int w0=threadIdx.y;
     int h_base = (blockIdx.z/W_grid)*TILE_WIDTH;
     int w_base = (blockIdx.z % W_grid)*TILE_WIDTH;
-    int h=h_base+h0;
-    int w=w_base+w0;
+    int h=h_base+w0;
+    int w=w_base+h0;
+
     for(int c=0;c<C;c++){
     if((h0<K) && (w0<K)){
-      W_share[(threadIdx.y*K)+threadIdx.x]=k4d(m,c,h0,w0);
+      W_share[(threadIdx.y*K)+threadIdx.x]=k4d(m,c,w0,h0);
     }
     __syncthreads();
     for(int i=h; i<X_width+h_base;i+=TILE_WIDTH){
@@ -50,7 +49,7 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
 
     for(int p=0;p<K;p++){
       for(int q=0;q<K;q++){
-        sum+=X_share[(p+w0)*X_width+(q+h0)]*W_share[(p*K)+q];
+        sum+=X_share[(w0+p)*X_width+h0+q]*W_share[(p*K)+q];
       }
     }
     __syncthreads();
@@ -75,8 +74,8 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     const int K = w.shape_[3]; //height and width of weights
 
     //cudaStream_t s = y.stream_->stream_;
-    const int W_grid = ceil((W-K+1)/(1.0*TILE_WIDTH));
-    const int H_grid = ceil((H-K+1)/(1.0*TILE_WIDTH));
+    const int W_grid = ceil((W-K+1)/(TILE_WIDTH));
+    const int H_grid = ceil((H-K+1)/(TILE_WIDTH));
     const int Z=W_grid*H_grid;
     dim3 gridDim(B, M, Z);
     dim3 blockDim(TILE_WIDTH,TILE_WIDTH,1);
@@ -96,5 +95,3 @@ void forward(mshadow::Tensor<gpu, 4, DType> &y, const mshadow::Tensor<gpu, 4, DT
 }
 
 #endif
-
-
