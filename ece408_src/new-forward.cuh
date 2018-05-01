@@ -30,23 +30,27 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     //int b = blockIdx.y;
     int m = blockIdx.y;
     //int m = blockIdx.x;
-    int h = ((blockIdx.z/W_grid)*TILE_WIDTH) +threadIdx.y;
-    int w = ((blockIdx.z % W_grid)*TILE_WIDTH)+threadIdx.x;
+    int h0=threadIdx.x;
+    int w0=threadIdx.y;
+    int h_base = (blockIdx.z/W_grid)*TILE_WIDTH;
+    int w_base = (blockIdx.z % W_grid)*TILE_WIDTH;
+    int h=h_base+h0;
+    int w=w_base+w0;
     for(int c=0;c<C;c++){
-    if((threadIdx.x<K) && (threadIdx.y<K)){
-      W_share[threadIdx.y*K+threadIdx.x]=k4d(m,c,threadIdx.y,threadIdx.x);
+    if((h0<K) && (w0<K)){
+      W_share[(threadIdx.y*K)+threadIdx.x]=k4d(m,c,h0,w0);
     }
     __syncthreads();
-    for(int i=h; i<X_width+(h-threadIdx.y);i+=TILE_WIDTH){
-      for(int j=w; j<X_width+(w-threadIdx.x);j+=TILE_WIDTH){
-        X_share[((i-(h-threadIdx.y))*X_width)+(j-(w-threadIdx.x))]=x4d(b,c,i,j); //load in tile needed for shared memory
+    for(int i=h; i<X_width+h_base;i+=TILE_WIDTH){
+      for(int j=w; j<X_width+w_base;j+=TILE_WIDTH){
+        X_share[(i-h_base)*X_width+(j-w_base)]=x4d(b,c,i,j); //load in tile needed for shared memory
       }
     }
     __syncthreads();
 
     for(int p=0;p<K;p++){
       for(int q=0;q<K;q++){
-        sum+=X_share[((threadIdx.y+p)*X_width)+(threadIdx.x+q)]*W_share[(p*K)+q];
+        sum+=X_share[(p+w0)*X_width+(q+h0)]*W_share[(p*K)+q];
       }
     }
     __syncthreads();
@@ -70,14 +74,14 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     const int W = x.shape_[3]; //width of input
     const int K = w.shape_[3]; //height and width of weights
 
-    cudaStream_t s = y.stream_->stream_;
+    //cudaStream_t s = y.stream_->stream_;
     const int W_grid = ceil((W-K+1)/(1.0*TILE_WIDTH));
     const int H_grid = ceil((H-K+1)/(1.0*TILE_WIDTH));
     const int Z=W_grid*H_grid;
     dim3 gridDim(B, M, Z);
     dim3 blockDim(TILE_WIDTH,TILE_WIDTH,1);
     size_t shmem_size=sizeof(float)*((TILE_WIDTH + K - 1)*(TILE_WIDTH + K - 1)+ K * K);
-    forward_kernel<<<gridDim, blockDim,shmem_size,s>>>(y.dptr_, x.dptr_, w.dptr_, B, M, C, H, W, K);
+    forward_kernel<<<gridDim, blockDim,shmem_size>>>(y.dptr_, x.dptr_, w.dptr_, B, M, C, H, W, K);
     // Use MSHADOW_CUDA_CALL to check for CUDA runtime errors.
     MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
 
@@ -92,4 +96,5 @@ void forward(mshadow::Tensor<gpu, 4, DType> &y, const mshadow::Tensor<gpu, 4, DT
 }
 
 #endif
+
 
