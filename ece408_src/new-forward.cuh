@@ -26,7 +26,7 @@ __global__ void unroll_weight(float *output_w, const float *k, const int M, cons
   if (((blockIdx.x * blockDim.x + threadIdx.x) < (K*K*C)) && ((blockIdx.y * blockDim.y + threadIdx.y) < M)) {
     output_w[idx] = k4d(m,c,h,w);
   }
-
+  __syncthreads();
   #undef k4d
 }
 
@@ -34,8 +34,8 @@ __global__ void unroll_input(float *output_x, const float *x, const int B, const
   #define x4d(i3, i2, i1, i0) x[(i3) * (C * H * W) + (i2) * (H * W) + (i1) * (W) + i0]
   int start_h = ((blockIdx.x * blockDim.x + threadIdx.x) % (H*W)) / W;
   int start_w = ((blockIdx.x * blockDim.x + threadIdx.x) % (H*W)) % W;
-  int h = start_h + ((blockIdx.y * blockDim.y + threadIdx.y) % (K*K)) / K;
-  int w = start_w + ((blockIdx.y * blockDim.y + threadIdx.y) % (K*K)) % K;
+  int h = start_h + (((blockIdx.y * blockDim.y + threadIdx.y) % (K*K)) / K);
+  int w = start_w + (((blockIdx.y * blockDim.y + threadIdx.y) % (K*K)) % K);
   int c = (blockIdx.y * blockDim.y + threadIdx.y) / (K*K);
   int b = (blockIdx.x * blockDim.x + threadIdx.x) / (H*W);
   //int input_wid = TILE_WIDTH * ceil((H*W*B)/(TILE_WIDTH*1.0));
@@ -44,6 +44,7 @@ __global__ void unroll_input(float *output_x, const float *x, const int B, const
   if (((blockIdx.x * blockDim.x + threadIdx.x) < (H*W*B)) && ((blockIdx.y * blockDim.y + threadIdx.y) < (K*K*C))) {
     output_x[idx] = x4d(b,c,h,w);
   }
+  __syncthreads();
   #undef x4d
 }
 
