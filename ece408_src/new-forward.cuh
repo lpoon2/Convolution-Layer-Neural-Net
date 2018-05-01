@@ -63,15 +63,49 @@ __global__ void unroll_multipy(float *weight, float *input, float *y, const int 
   int m = row;
   int h = (col % (H_out*W_out)) / W_out;
   int w = (col % (H_out*W_out)) % W_out;
-  float temp = 0;
+  //float temp = 0;
 
+  __shared__ float Mds[TILE_WIDTH][TILE_WIDTH];
+  __shared__ float Nds[TILE_WIDTH][TILE_WIDTH];
+  float Pvalue = 0.0 ;
+
+  for(int ph = 0 ; ph < (weight_wid-1)/TILE_WIDTH + 1 ; ph++) {
+
+    if( ( (ph*TILE_WIDTH + threadIdx.x) < weight_wid) && (row < M))
+    {
+     Mds[threadIdx.y][threadIdx.x] = weight[row*weight_wid + ph*TILE_WIDTH + threadIdx.x];
+    }else{
+      Mds[threadIdx.y][threadIdx.x] = 0;
+    }
+
+    if( ( (ph*TILE_WIDTH + threadIdx.y) < K*K*C ) && (col< input_wid)){
+     Nds[threadIdx.y][threadIdx.x] = input[(ph*TILE_WIDTH + threadIdx.y)*input_wid + col ];
+    }
+    else{
+      Nds[threadIdx.y][threadIdx.x] = 0;
+    }
+
+    __syncthreads();
+
+     for(int i = 0 ; i < TILE_WIDTH ; i ++){
+        Pvalue += Mds[threadIdx.y][i] * Nds[i][threadIdx.x];
+     }
+
+    __syncthreads();
+  }
+
+  if((row < M) && (col < input_wid))
+  {
+    y4d(b,m,h,w)  = Pvalue;
+  }
+  /*
   if ((col < input_wid) && (row < M)) {
     for (int i = 0; i< weight_wid; i++) {
         temp += weight[row * weight_wid + i] * input[i * input_wid + col];
     }
     y4d(b,m,h,w) = temp;
   }
-
+*/
   #undef y4d
 }
 
