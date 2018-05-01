@@ -1,7 +1,7 @@
 
 #ifndef MXNET_OPERATOR_NEW_FORWARD_CUH_
 #define MXNET_OPERATOR_NEW_FORWARD_CUH_
-#define TILE_WIDTH 24
+#define TILE_WIDTH 8
 
 #include <mxnet/base.h>
 
@@ -10,22 +10,22 @@ namespace mxnet
 namespace op
 {
 
-__global__ void forward_kernel(float *y, const float *x, const float *k, const int B, const int M, const int C, const int H, const int W, const int K){
+__global__ void forward_kernel(float *y, const float *x, const float *k, const int B, const int M, const int C, const int H, const int W, const int K, int W_grid){
 
     float sum=0.0;
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
     int X_width=(TILE_WIDTH+K-1);
-    int W_size=(X_width*X_width);
+    //int W_size=(X_width*X_width);
     extern __shared__ float shmem[];
     float* X_share = &shmem[0];
     float* W_share=&shmem[X_width*X_width];
     #define y4d(i3, i2, i1, i0) y[(i3) * (M * H_out * W_out) + (i2) * (H_out * W_out) + (i1) * (W_out) + i0]
     #define x4d(i3, i2, i1, i0) x[(i3) * (C * H * W) + (i2) * (H * W) + (i1) * (W) + i0]
     #define k4d(i3, i2, i1, i0) k[(i3) * (C * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
-    int W_grid=ceil(W_out/TILE_WIDTH*1.0);
-    //int H_grid=ceil(H_out/TILE_WIDTH*1.0);
 
+    //int H_grid=ceil(H_out/TILE_WIDTH*1.0);
+    W_grid=W_out/TILE_WIDTH;
     int b = blockIdx.x;
     int m = blockIdx.y;
     int h0=threadIdx.x;
@@ -42,14 +42,14 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     __syncthreads();
     for(int i=h; i<X_width+h_base;i+=TILE_WIDTH){
       for(int j=w; j<X_width+w_base;j+=TILE_WIDTH){
-        X_share[(i-h_base)*X_width+(j-w_base)]=x4d(b,c,i,j); //load in tile needed for shared memory
+        X_share[((i-h_base)*X_width)+(j-w_base)]=x4d(b,c,i,j); //load in tile needed for shared memory
       }
     }
     __syncthreads();
 
     for(int p=0;p<K;p++){
       for(int q=0;q<K;q++){
-        sum+=X_share[(w0+p)*X_width+h0+q]*W_share[(p*K)+q];
+        sum+=X_share[((w0+p)*X_width)+h0+q]*W_share[(p*K)+q];
       }
     }
     __syncthreads();
@@ -80,7 +80,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     dim3 gridDim(B, M, Z);
     dim3 blockDim(TILE_WIDTH,TILE_WIDTH,1);
     size_t shmem_size=sizeof(float)*((TILE_WIDTH + K - 1)*(TILE_WIDTH + K - 1)+ K * K);
-    forward_kernel<<<gridDim, blockDim,shmem_size>>>(y.dptr_, x.dptr_, w.dptr_, B, M, C, H, W, K);
+    forward_kernel<<<gridDim, blockDim,shmem_size>>>(y.dptr_, x.dptr_, w.dptr_, B, M, C, H, W, K,W_grid);
     // Use MSHADOW_CUDA_CALL to check for CUDA runtime errors.
     MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
 
