@@ -14,7 +14,8 @@ namespace op
 /*
   This will be refractor after Wally's optimization (writing weight matrix into constant memory)
 */
-__constant__ float weight[1000];
+__constant__ float weight[2400];
+
 __global__ void unroll_weight(float *output_w, const float *k, const int M, const int C, const int K) {
   int m = (blockIdx.y * blockDim.y + threadIdx.y);
   int c = (blockIdx.x * blockDim.x + threadIdx.x) / (K*K);
@@ -171,14 +172,10 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     //milestone 4 code
     float *unrolled_w;
     float *unrolled_x;
-	float *host_unrolled_w;
-	//#define M_const  y.shape_[1]
-	//#define C_const  x.shape_[1]
-	//#define K_const  w.shape_[3]
-	
-		
-	cudaMalloc((void **) &unrolled_w, K*K*C*M * sizeof(float));
-	host_unrolled_w = (float*)malloc(K*K*C*M * sizeof(float));
+	  float *host_unrolled_w;
+
+	  cudaMalloc((void **) &unrolled_w, K*K*C*M * sizeof(float));
+	  host_unrolled_w = (float*)malloc(2400 * sizeof(float));
     cudaMalloc((void **) &unrolled_x, H*W*B*K*K*C * sizeof(float));
 
     //unrolling weight
@@ -189,10 +186,10 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     unroll_weight<<<gridDim, blockDim>>>(unrolled_w, w.dptr_, M, C, K);
     // Use MSHADOW_CUDA_CALL to check for CUDA runtime errors.
     MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
-	
-	//transferring the unrolled weight to the host
-	cudaMemcpy(host_unrolled_w, unrolled_w, K*K*C*M*sizeof(float), cudaMemcpyDeviceToHost);
-	cudaMemcpyToSymbol(weight, host_unrolled_w, K*K*C*M*sizeof(float));
+
+  	//transferring the unrolled weight to the host
+  	cudaMemcpy(host_unrolled_w, unrolled_w, K*K*C*M*sizeof(float), cudaMemcpyDeviceToHost);
+  	cudaMemcpyToSymbol(weight, host_unrolled_w, K*K*C*M*sizeof(float));
 
     //unrolling input
     X = ceil((H_out*W_out*B)/(TILE_WIDTH*1.0));
@@ -215,7 +212,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     //free cuda memory
     cudaFree(unrolled_w);
     cudaFree(unrolled_x);
-
+    free(host_unrolled_w);
     // Use MSHADOW_CUDA_CALL to check for CUDA runtime errors.
     MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
 
