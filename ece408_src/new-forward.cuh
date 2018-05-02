@@ -11,9 +11,7 @@ namespace mxnet
 {
 namespace op
 {
-/*
-  This will be refractor after Wally's optimization (writing weight matrix into constant memory)
-*/
+
 __constant__ float weight[2400];
 
 __global__ void unroll_weight(float *output_w, const float *k, const int M, const int C, const int K) {
@@ -42,7 +40,6 @@ __global__ void unroll_input(float *output_x, const float *x, const int B, const
   int w = start_w + (((blockIdx.y * blockDim.y + threadIdx.y) % (K*K)) % K);
   int c = (blockIdx.y * blockDim.y + threadIdx.y) / (K*K);
   int b = (blockIdx.x * blockDim.x + threadIdx.x) / (H_out*W_out);
-  //int input_wid = TILE_WIDTH * ceil((H*W*B)/(TILE_WIDTH*1.0));
   int idx = (H_out*W_out*B) * (blockIdx.y * blockDim.y + threadIdx.y) + (blockIdx.x * blockDim.x + threadIdx.x);
 
   if (((blockIdx.x * blockDim.x + threadIdx.x) < (H_out*W_out*B)) && ((blockIdx.y * blockDim.y + threadIdx.y) < (K*K*C))) {
@@ -65,20 +62,12 @@ __global__ void unroll_multipy(/*float *weight, */float *input, float *y, const 
   int m = row;
   int h = (col % (H_out*W_out)) / W_out;
   int w = (col % (H_out*W_out)) % W_out;
-  //float temp = 0;
 
-  __shared__ float Mds[TILE_WIDTH][TILE_WIDTH];
+  //__shared__ float Mds[TILE_WIDTH][TILE_WIDTH];
   __shared__ float Nds[TILE_WIDTH][TILE_WIDTH];
   float Pvalue = 0.0 ;
 
   for(int ph = 0 ; ph < (weight_wid-1)/TILE_WIDTH + 1 ; ph++) {
-
-    if( ( (ph*TILE_WIDTH + threadIdx.x) < weight_wid) && (row < M))
-    {
-     Mds[threadIdx.y][threadIdx.x] = weight[row*weight_wid + ph*TILE_WIDTH + threadIdx.x];
-    }else{
-      Mds[threadIdx.y][threadIdx.x] = 0;
-    }
 
     if( ( (ph*TILE_WIDTH + threadIdx.y) < K*K*C ) && (col< input_wid)){
      Nds[threadIdx.y][threadIdx.x] = input[(ph*TILE_WIDTH + threadIdx.y)*input_wid + col ];
@@ -90,7 +79,7 @@ __global__ void unroll_multipy(/*float *weight, */float *input, float *y, const 
     __syncthreads();
 
      for(int i = 0 ; i < TILE_WIDTH ; i ++){
-        Pvalue += Mds[threadIdx.y][i] * Nds[i][threadIdx.x];
+        Pvalue += weight[row*weight_wid + ph*TILE_WIDTH + i]* Nds[i][threadIdx.x];
      }
 
     __syncthreads();
@@ -100,14 +89,7 @@ __global__ void unroll_multipy(/*float *weight, */float *input, float *y, const 
   {
     y4d(b,m,h,w)  = Pvalue;
   }
-  /*
-  if ((col < input_wid) && (row < M)) {
-    for (int i = 0; i< weight_wid; i++) {
-        temp += weight[row * weight_wid + i] * input[i * input_wid + col];
-    }
-    y4d(b,m,h,w) = temp;
-  }
-*/
+
   #undef y4d
 }
 
@@ -121,9 +103,7 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     #define k4d(i3, i2, i1, i0) k[(i3) * (C * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
 
     int b = (blockIdx.y * blockDim.y + threadIdx.y) / H_out;
-    //int b = blockIdx.y;
     int m = (blockIdx.x * blockDim.x + threadIdx.x) / W_out;
-    //int m = blockIdx.x;
     int h = (blockIdx.y * blockDim.y + threadIdx.y) % H_out;
     int w = (blockIdx.x * blockDim.x + threadIdx.x) % W_out;
 
@@ -138,7 +118,6 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
       }
       y4d(b,m,h,w)=acc;
     }
-    //y4d(blockIdx.x,blockIdx.y,threadIdx.x,threadIdx.y)=sum;
     #undef y4d
     #undef x4d
     #undef k4d
@@ -160,14 +139,6 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     const int K = w.shape_[3]; //height and width of weights
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
-    // milestone 3 code
-    /*
-    int X = ceil((M*W_out)/(TILE_WIDTH*1.0));
-    int Y = ceil((B*H_out)/(TILE_WIDTH*1.0));
-    dim3 gridDim(X, Y, 1);
-    dim3 blockDim(TILE_WIDTH,TILE_WIDTH,1);
-    forward_kernel<<<gridDim, blockDim>>>(y.dptr_,x.dptr_,w.dptr_, B,M,C,H,W,K);
-    */
 
     //milestone 4 code
     float *unrolled_w;
