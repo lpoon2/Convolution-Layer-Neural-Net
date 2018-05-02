@@ -14,6 +14,7 @@ namespace op
 /*
   This will be refractor after Wally's optimization (writing weight matrix into constant memory)
 */
+__constant__ float weight[1000];
 __global__ void unroll_weight(float *output_w, const float *k, const int M, const int C, const int K) {
   int m = (blockIdx.y * blockDim.y + threadIdx.y);
   int c = (blockIdx.x * blockDim.x + threadIdx.x) / (K*K);
@@ -50,7 +51,7 @@ __global__ void unroll_input(float *output_x, const float *x, const int B, const
   #undef x4d
 }
 
-__global__ void unroll_multipy(float *weight, float *input, float *y, const int B, const int M, const int C, const int H, const int W, const int K) {
+__global__ void unroll_multipy(/*float *weight, */float *input, float *y, const int B, const int M, const int C, const int H, const int W, const int K) {
   const int H_out = H - K + 1;
   const int W_out = W - K + 1;
   #define y4d(i3, i2, i1, i0) y[(i3) * (M * H_out * W_out) + (i2) * (H_out * W_out) + (i1) * (W_out) + i0]
@@ -170,7 +171,14 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     //milestone 4 code
     float *unrolled_w;
     float *unrolled_x;
-    cudaMalloc((void **) &unrolled_w, K*K*C*M * sizeof(float));
+	float *host_unrolled_w;
+	//#define M_const  y.shape_[1]
+	//#define C_const  x.shape_[1]
+	//#define K_const  w.shape_[3]
+	
+		
+	cudaMalloc((void **) &unrolled_w, K*K*C*M * sizeof(float));
+	host_unrolled_w = (float*)malloc(K*K*C*M * sizeof(float));
     cudaMalloc((void **) &unrolled_x, H*W*B*K*K*C * sizeof(float));
 
     //unrolling weight
@@ -181,6 +189,10 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     unroll_weight<<<gridDim, blockDim>>>(unrolled_w, w.dptr_, M, C, K);
     // Use MSHADOW_CUDA_CALL to check for CUDA runtime errors.
     MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
+	
+	//transferring the unrolled weight to the host
+	cudaMemcpy(host_unrolled_w, unrolled_w, K*K*C*M*sizeof(float), cudaMemcpyDeviceToHost);
+	cudaMemcpyToSymbol(weight, host_unrolled_w, K*K*C*M*sizeof(float));
 
     //unrolling input
     X = ceil((H_out*W_out*B)/(TILE_WIDTH*1.0));
@@ -196,7 +208,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     Y = ceil(M/(TILE_WIDTH*1.0));
     dim3 gridDim3(X, Y, 1);
     dim3 blockDim3(TILE_WIDTH,TILE_WIDTH,1);
-    unroll_multipy<<<gridDim3, blockDim3>>>(unrolled_w, unrolled_x, y.dptr_, B, M, C, H, W, K);
+    unroll_multipy<<<gridDim3, blockDim3>>>(/*unrolled_w, */unrolled_x, y.dptr_, B, M, C, H, W, K);
     // Use MSHADOW_CUDA_CALL to check for CUDA runtime errors.
     MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
 
