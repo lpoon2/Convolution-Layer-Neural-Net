@@ -9,8 +9,7 @@ namespace mxnet
 namespace op
 {
 __global__ void forward_kernel(float *y, const float *x, const float *k, const int B, const int M, const int C, const int H, const int W, const int K){
-
-    float sum=0.0;
+    __shared__ float sum;
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
     int X_width = (TILE_WIDTH+K-1);
@@ -32,30 +31,34 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     int w_base = (blockIdx.z % W_grid)*TILE_WIDTH;
     int h = h_base+h0;
     int w = w_base+w0;
+    int c = threadIdx.z;
 
-    for(int c=0;c<C;c++){
+    if ((h0 == 0) && (w0 == 0) && (threadIdx.z == 0)) {
+      sum = 0;
+    }
+    __syncthreads();
 
-      if((h0<K) && (w0<K)){
-        W_share[(threadIdx.y*K)+threadIdx.x]=k4d(m,c,h0,w0);
+    if((h0<K) && (w0<K)){
+      W_share[(threadIdx.y*K)+threadIdx.x]=k4d(m,c,h0,w0);
+    }
+    __syncthreads();
+
+    for(int i=h; i< h_base + X_width ; i+=TILE_WIDTH){
+      for(int j=w; j< w_base + X_width; j+=TILE_WIDTH){
+        X_share[(i-h_base)*X_width+(j-w_base)]=x4d(b,c,i,j); //load in tile needed for shared memory
       }
-      __syncthreads();
+    }
+    __syncthreads();
 
-      for(int i=h; i< h_base + X_width ;i+=TILE_WIDTH){
-        for(int j=w; j< w_base + X_width;j+=TILE_WIDTH){
-          X_share[(i-h_base)*X_width+(j-w_base)]=x4d(b,c,i,j); //load in tile needed for shared memory
-        }
+    for(int p=0; p<K; p++){
+      for(int q=0; q<K; q++){
+        atomicAdd(&sum, X_share[((threadIdx.y+p)*X_width)+(threadIdx.x+q)]*W_share[(p*K)+q]);
       }
-      __syncthreads();
+    }
+    __syncthreads();
 
-      for(int p=0;p<K;p++){
-        for(int q=0;q<K;q++){
-          sum+=X_share[((threadIdx.y+p)*X_width)+(threadIdx.x+q)]*W_share[(p*K)+q];
-        }
-      }
-      __syncthreads();
-  }
-  if ( (b < B) && (m < M) && (h < H_out) && (w < W_out)){
-  y4d(b,m,h,w)=sum;
+  if ((b < B) && (m < M) && (h < H_out) && (w < W_out) && (c == 0)){
+    y4d(b,m,h,w)=sum;
   }
 
     #undef y4d
@@ -80,9 +83,9 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     const int H_grid = ceil(H_out/(1.0*TILE_WIDTH));
     const int Z = W_grid*H_grid;
 
-    printf("HELLO======= B :%d, M: %d, C: %d, H:%d, W:%d, K:%d", B, M, C, H, W, K);
+    //printf("HELLO======= B :%d, M: %d, C: %d, H:%d, W:%d, K:%d", B, M, C, H, W, K);
     dim3 gridDim(B, M, Z);
-    dim3 blockDim(TILE_WIDTH,TILE_WIDTH,1);
+    dim3 blockDim(TILE_WIDTH, TILE_WIDTH, C);
 
     size_t shmem_size=sizeof(float)*(((TILE_WIDTH + K - 1) * (TILE_WIDTH + K - 1)) + (K * K));
     forward_kernel<<<gridDim, blockDim,shmem_size>>>(y.dptr_, x.dptr_,w.dptr_, B, M, C, H, W, K);

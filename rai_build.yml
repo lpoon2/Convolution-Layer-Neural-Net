@@ -15,5 +15,4 @@ commands:
     - /bin/bash -c "for src in ece408_src/*; do cp -v $src /mxnet/src/operator/custom/.; done" # copy source files to mxnet tree
     - nice -n20 make -C /mxnet # build mxnet
     - pip2 install --user -e /mxnet/python   # install python bindings
-    - nvprof -o timeline.nvprof python m4.1.py # execute code
-    - nvprof --analysis-metrics -o analysis.nvprof python m4.1.py
+    - python m4.1.py # execute code
