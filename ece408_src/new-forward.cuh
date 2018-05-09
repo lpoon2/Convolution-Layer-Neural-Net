@@ -8,7 +8,7 @@ namespace mxnet
 {
 namespace op
 {
-__global__ void forward_kernel(float *y, const float *x, const float *k, const int B, const int M, const int C, const int H, const int W, const int K){
+__global__ void forward_kernel(float * __restrict__ y, const float * __restrict__ x, const float * __restrict__ k, const int B, const int M, const int C, const int H, const int W, const int K){
 
     float sum=0.0;
     const int H_out = H - K + 1;
@@ -65,7 +65,7 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
 
 
 template <>
-void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tensor<gpu, 4, float> &x, const mshadow::Tensor<gpu, 4, float> &w)
+void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> & __restrict__ y, const mshadow::Tensor<gpu, 4, float> & __restrict__ x, const mshadow::Tensor<gpu, 4, float> & __restrict__ w)
 {
     const int B = x.shape_[0]; //batches
     const int M = y.shape_[1]; //output channels
@@ -80,7 +80,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     const int H_grid = ceil(H_out/(1.0*TILE_WIDTH));
     const int Z = W_grid*H_grid;
 
-    printf("HELLO======= B :%d, M: %d, C: %d, H:%d, W:%d, K:%d", B, M, C, H, W, K);
+    //printf("HELLO======= B :%d, M: %d, C: %d, H:%d, W:%d, K:%d", B, M, C, H, W, K);
     dim3 gridDim(B, M, Z);
     dim3 blockDim(TILE_WIDTH,TILE_WIDTH,1);
 
