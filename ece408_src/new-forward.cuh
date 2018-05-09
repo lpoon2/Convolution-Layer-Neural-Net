@@ -47,15 +47,36 @@ __global__ void forward_kernel(float * __restrict__ y, const float * __restrict_
       }
       __syncthreads();
 
-      for(int p=0;p<K;p++){
-        for(int q=0;q<K;q++){
-          sum+=X_share[((threadIdx.y+p)*X_width)+(threadIdx.x+q)]*W_share[(p*K)+q];
-        }
-      }
+      sum+=(X_share[((threadIdx.y)*X_width)+(threadIdx.x)]*W_share[0]
+          + X_share[((threadIdx.y)*X_width)+(threadIdx.x+1)]*W_share[1]
+          + X_share[((threadIdx.y)*X_width)+(threadIdx.x+2)]*W_share[2]
+          + X_share[((threadIdx.y)*X_width)+(threadIdx.x+3)]*W_share[3]
+          + X_share[((threadIdx.y)*X_width)+(threadIdx.x+4)]*W_share[4]
+          + X_share[((threadIdx.y+1)*X_width)+(threadIdx.x)]*W_share[(K)]
+          + X_share[((threadIdx.y+1)*X_width)+(threadIdx.x+1)]*W_share[(K)+1]
+          + X_share[((threadIdx.y+1)*X_width)+(threadIdx.x+2)]*W_share[(K)+2]
+          + X_share[((threadIdx.y+1)*X_width)+(threadIdx.x+3)]*W_share[(K)+3]
+          + X_share[((threadIdx.y+1)*X_width)+(threadIdx.x+4)]*W_share[(K)+4]
+          + X_share[((threadIdx.y+2)*X_width)+(threadIdx.x)]*W_share[(2*K)]
+          + X_share[((threadIdx.y+2)*X_width)+(threadIdx.x+1)]*W_share[(2*K)+1]
+          + X_share[((threadIdx.y+2)*X_width)+(threadIdx.x+2)]*W_share[(2*K)+2]
+          + X_share[((threadIdx.y+2)*X_width)+(threadIdx.x+3)]*W_share[(2*K)+3]
+          + X_share[((threadIdx.y+2)*X_width)+(threadIdx.x+4)]*W_share[(2*K)+4]
+          + X_share[((threadIdx.y+3)*X_width)+(threadIdx.x)]*W_share[(3*K)]
+          + X_share[((threadIdx.y+3)*X_width)+(threadIdx.x+1)]*W_share[(3*K)+1]
+          + X_share[((threadIdx.y+3)*X_width)+(threadIdx.x+2)]*W_share[(3*K)+2]
+          + X_share[((threadIdx.y+3)*X_width)+(threadIdx.x+3)]*W_share[(3*K)+3]
+          + X_share[((threadIdx.y+3)*X_width)+(threadIdx.x+4)]*W_share[(3*K)+4]
+          + X_share[((threadIdx.y+4)*X_width)+(threadIdx.x)]*W_share[(4*K)]
+          + X_share[((threadIdx.y+4)*X_width)+(threadIdx.x+1)]*W_share[(4*K)+1]
+          + X_share[((threadIdx.y+4)*X_width)+(threadIdx.x+2)]*W_share[(4*K)+2]
+          + X_share[((threadIdx.y+4)*X_width)+(threadIdx.x+3)]*W_share[(4*K)+3]
+          + X_share[((threadIdx.y+4)*X_width)+(threadIdx.x+4)]*W_share[(4*K)+4]);
       __syncthreads();
   }
+
   if ( (b < B) && (m < M) && (h < H_out) && (w < W_out)){
-  y4d(b,m,h,w)=sum;
+    y4d(b,m,h,w)=sum;
   }
 
     #undef y4d
