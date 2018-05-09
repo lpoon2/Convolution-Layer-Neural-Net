@@ -63,7 +63,7 @@ __global__ void forward_kernel(float * __restrict__ y, const float * __restrict_
 
 
 template <>
-void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tensor<gpu, 4, float> &x, const mshadow::Tensor<gpu, 4, float> &w)
+void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> & __restrict__ y, const mshadow::Tensor<gpu, 4, float> & __restrict__ x, const mshadow::Tensor<gpu, 4, float> & __restrict__ w)
 {
     const int B = x.shape_[0]; //batches
     const int M = y.shape_[1]; //output channels
