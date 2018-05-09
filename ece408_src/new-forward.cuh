@@ -8,7 +8,7 @@ namespace mxnet
 {
 namespace op
 {
-__global__ void forward_kernel(float *y, const float *x, const float *k, const int B, const int M, const int C, const int H, const int W, const int K){
+__global__ void forward_kernel(float * __restrict__ y, const float * __restrict__ x, const float * __restrict__ k, const int B, const int M, const int C, const int H, const int W, const int K){
     float sum = 0.0;
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
@@ -32,7 +32,7 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     int h = h_base+h0;
     int w = w_base+w0;
     int c = threadIdx.z;
-    
+
     if((h0<K) && (w0<K)){
       W_share[c*(K * K)+(threadIdx.y*K)+threadIdx.x]=k4d(m,c,h0,w0);
     }
