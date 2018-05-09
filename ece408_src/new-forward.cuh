@@ -78,7 +78,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> & __restrict__ y, const 
     const int H_grid = ceil(H_out/(1.0*TILE_WIDTH));
     const int Z = W_grid*H_grid;
 
-    //printf("HELLO======= B :%d, M: %d, C: %d, H:%d, W:%d, K:%d", B, M, C, H, W, K);
+    printf("HELLO======= B :%d, M: %d, C: %d, H:%d, W:%d, K:%d", B, M, C, H, W, K);
     dim3 gridDim(B, M, Z);
     dim3 blockDim(TILE_WIDTH,TILE_WIDTH,C);
 
