@@ -1,7 +1,5 @@
 #ifndef MXNET_OPERATOR_NEW_FORWARD_CUH_
 #define MXNET_OPERATOR_NEW_FORWARD_CUH_
-#define TILE_WIDTH 13
-
 #include <mxnet/base.h>
 
 namespace mxnet
@@ -12,6 +10,7 @@ __global__ void forward_kernel(float * __restrict__ y, const float * __restrict_
     float sum = 0.0;
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
+    int TILE_WIDTH = (C == 1) ? 32 : 13;
     int X_width = (TILE_WIDTH+K-1);
     extern __shared__ float shmem[];
     float* X_share = &shmem[0];
@@ -32,7 +31,6 @@ __global__ void forward_kernel(float * __restrict__ y, const float * __restrict_
     int h = h_base+h0;
     int w = w_base+w0;
     int c = threadIdx.z;
-
     if((h0<K) && (w0<K)){
       W_share[c*(K * K)+(threadIdx.y*K)+threadIdx.x]=k4d(m,c,h0,w0);
     }
@@ -45,11 +43,32 @@ __global__ void forward_kernel(float * __restrict__ y, const float * __restrict_
       }
       __syncthreads();
 
-      for(int p=0;p<K;p++){
-        for(int q=0;q<K;q++){
-          sum += X_share[c*(X_width*X_width)+((threadIdx.y+p)*X_width)+(threadIdx.x+q)]*W_share[c*(K * K)+(p*K)+q];
-        }
-      }
+      sum+=(X_share[(c*(X_width*X_width)+(threadIdx.y)*X_width)+(threadIdx.x)]*W_share[c*(K * K)]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y)*X_width)+(threadIdx.x+1)]*W_share[c*(K * K)+1]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y)*X_width)+(threadIdx.x+2)]*W_share[c*(K * K)+2]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y)*X_width)+(threadIdx.x+3)]*W_share[c*(K * K)+3]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y)*X_width)+(threadIdx.x+4)]*W_share[c*(K * K)+4]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+1)*X_width)+(threadIdx.x)]*W_share[c*(K * K)+(K)]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+1)*X_width)+(threadIdx.x+1)]*W_share[c*(K * K)+(K)+1]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+1)*X_width)+(threadIdx.x+2)]*W_share[c*(K * K)+(K)+2]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+1)*X_width)+(threadIdx.x+3)]*W_share[c*(K * K)+(K)+3]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+1)*X_width)+(threadIdx.x+4)]*W_share[c*(K * K)+(K)+4]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+2)*X_width)+(threadIdx.x)]*W_share[c*(K * K)+(2*K)]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+2)*X_width)+(threadIdx.x+1)]*W_share[c*(K * K)+(2*K)+1]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+2)*X_width)+(threadIdx.x+2)]*W_share[c*(K * K)+(2*K)+2]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+2)*X_width)+(threadIdx.x+3)]*W_share[c*(K * K)+(2*K)+3]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+2)*X_width)+(threadIdx.x+4)]*W_share[c*(K * K)+(2*K)+4]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+3)*X_width)+(threadIdx.x)]*W_share[c*(K * K)+(3*K)]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+3)*X_width)+(threadIdx.x+1)]*W_share[c*(K * K)+(3*K)+1]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+3)*X_width)+(threadIdx.x+2)]*W_share[c*(K * K)+(3*K)+2]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+3)*X_width)+(threadIdx.x+3)]*W_share[c*(K * K)+(3*K)+3]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+3)*X_width)+(threadIdx.x+4)]*W_share[c*(K * K)+(3*K)+4]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+4)*X_width)+(threadIdx.x)]*W_share[c*(K * K)+(4*K)]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+4)*X_width)+(threadIdx.x+1)]*W_share[c*(K * K)+(4*K)+1]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+4)*X_width)+(threadIdx.x+2)]*W_share[c*(K * K)+(4*K)+2]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+4)*X_width)+(threadIdx.x+3)]*W_share[c*(K * K)+(4*K)+3]
+          + X_share[(c*(X_width*X_width)+(threadIdx.y+4)*X_width)+(threadIdx.x+4)]*W_share[c*(K * K)+(4*K)+4]);
+
       __syncthreads();
 
   if ((b < B) && (m < M) && (h < H_out) && (w < W_out)) {
@@ -73,12 +92,14 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> & __restrict__ y, const 
     const int K = w.shape_[3]; //height and width of weights
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
+    int TILE_WIDTH = (C == 1) ? 32 : 13;
     //cudaStream_t s = y.stream_->stream_;
     const int W_grid = ceil(W_out/(1.0*TILE_WIDTH));
     const int H_grid = ceil(H_out/(1.0*TILE_WIDTH));
     const int Z = W_grid*H_grid;
 
-    printf("HELLO======= B :%d, M: %d, C: %d, H:%d, W:%d, K:%d", B, M, C, H, W, K);
+
+    //printf("HELLO======= B :%d, M: %d, C: %d, H:%d, W:%d, K:%d", B, M, C, H, W, K);
     dim3 gridDim(B, M, Z);
     dim3 blockDim(TILE_WIDTH,TILE_WIDTH,C);
 
