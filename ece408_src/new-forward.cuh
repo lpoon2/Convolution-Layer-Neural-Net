@@ -1,6 +1,5 @@
 #ifndef MXNET_OPERATOR_NEW_FORWARD_CUH_
 #define MXNET_OPERATOR_NEW_FORWARD_CUH_
-#define TILE_WIDTH 16
 
 #include <mxnet/base.h>
 
@@ -13,6 +12,7 @@ __global__ void forward_kernel(float * __restrict__ y, const float * __restrict_
     float sum=0.0;
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
+    int TILE_WIDTH = (C == 1) ? 16 : 13;
     int X_width = (TILE_WIDTH+K-1);
     extern __shared__ float shmem[];
     float* X_share = &shmem[0];
@@ -96,6 +96,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> & __restrict__ y, const 
     const int K = w.shape_[3]; //height and width of weights
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
+    int TILE_WIDTH = (C == 1) ? 16 : 13;
     //cudaStream_t s = y.stream_->stream_;
     const int W_grid = ceil(W_out/(1.0*TILE_WIDTH));
     const int H_grid = ceil(H_out/(1.0*TILE_WIDTH));
